@@ -1,4 +1,4 @@
-const MPV = require("node-mpv");
+import MPV from "node-mpv";
 import { writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
