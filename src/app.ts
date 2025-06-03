@@ -7,11 +7,27 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
 
   getState(): Partial<T> {
     const state: Partial<T> = {};
+
+    // own enumerable properties
     for (const key of Object.keys(this)) {
       if (key !== "schema" && typeof (this as any)[key] !== "function") {
         state[key as keyof T] = (this as any)[key];
       }
     }
+
+    // include getter properties from the prototype chain
+    let proto = Object.getPrototypeOf(this);
+    while (proto && proto !== Object.prototype) {
+      for (const key of Object.getOwnPropertyNames(proto)) {
+        if (key === "constructor" || key in state) continue;
+        const desc = Object.getOwnPropertyDescriptor(proto, key);
+        if (desc && typeof desc.get === "function") {
+          state[key as keyof T] = (this as any)[key];
+        }
+      }
+      proto = Object.getPrototypeOf(proto);
+    }
+
     return state;
   }
 
