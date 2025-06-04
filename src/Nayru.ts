@@ -18,9 +18,6 @@ export class Nayru extends DynamicServerApp<NayruState> {
     console.log(`💬 Queuing: "${text}"`);
     await this.audio.add(text);
   }
-  async stopAudio() {
-    this.audio.stop();
-  }
   async clearAudioQueue() {
     this.audio.clear();
   }
