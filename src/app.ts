@@ -77,7 +77,6 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
       console.error("❌ Failed to set state:", e);
     }
   }
-
 }
 
 export async function runDynamicApp<T extends Record<string, any>>(appInstance: DynamicServerApp<T>): Promise<void> {
