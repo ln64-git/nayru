@@ -1,10 +1,12 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams, } from "child_process";
-import { writeFileSync, unlinkSync, existsSync } from "fs";
+import { unlinkSync, existsSync, writeFileSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { azureTTS } from "./azure";
+import type { TTSProvider } from "../providers/tts-provider";
 
 export class AudioController {
+  constructor(private tts: TTSProvider) { }
+  
   private queue: string[] = [];
   private history: string[] = [];
   private playing = false;
@@ -12,7 +14,7 @@ export class AudioController {
   private mpvProcess: ChildProcessWithoutNullStreams | null = null;
 
   async add(text: string): Promise<void> {
-    const buffer = await azureTTS(text);
+    const buffer = await this.tts.speak(text);
     if (!buffer) return;
 
     const filePath = join("/tmp", `${randomUUID()}.wav`);

@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { AudioController } from "./utils/AudioController";
 import { DynamicServerApp } from "../core/app";
+import { AzureTTS } from "./providers/azure";
+import type { TTSProvider } from "./providers/tts-provider";
+import { GoogleTTS } from "./providers/google";
 
 export const NayruSchema = z.object({
   port: z.number(),
@@ -11,7 +14,7 @@ export class Nayru extends DynamicServerApp<NayruState> {
   schema = NayruSchema;
   port = 2003;
 
-  private audio = new AudioController();
+  private audio = new AudioController(getProvider());
 
   async speak(text: string): Promise<void> {
     console.log(`💬 Queuing: "${text}"`);
@@ -41,3 +44,11 @@ export class Nayru extends DynamicServerApp<NayruState> {
 
 }
 
+
+function getProvider(): TTSProvider {
+  switch (process.env.TTS_PROVIDER) {
+    // case "elevenlabs": return new ElevenLabsTTS();
+    case "google": return new GoogleTTS();
+    default: return new AzureTTS();
+  }
+}
