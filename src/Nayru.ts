@@ -1,11 +1,10 @@
 import { z } from "zod";
-import { DynamicServerApp } from "./app";
 import { AudioController } from "./utils/AudioController";
+import { DynamicServerApp } from "../core/app";
 
 export const NayruSchema = z.object({
   port: z.number(),
 });
-
 export type NayruState = z.infer<typeof NayruSchema>;
 
 export class Nayru extends DynamicServerApp<NayruState> {
