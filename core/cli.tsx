@@ -222,8 +222,12 @@ export function AppCli({ app }: AppProps) {
 
       <Text>
         <Text color="cyan" bold>{className}</Text>
-        <Text color="gray"> (port {app.port})</Text>
-        {isSynced && !app.isServerInstance && <Text color="red"> (Remote)</Text>}
+        <Text color="gray">
+          (port {app.port})
+          {isSynced && !app.isServerInstance && (
+            <Text color="red">remote</Text>
+          )}
+        </Text>
       </Text>
 
       {Object.keys(state).some((key) => key !== "port" && key !== "isServerInstance") && (

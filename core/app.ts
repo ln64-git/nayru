@@ -95,9 +95,10 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
 export async function runDynamicApp<T extends Record<string, any>>(
   app: DynamicServerApp<T>
 ): Promise<void> {
-  const { command, key, value, returnOutput, notify } = cliToState(
+  const { command, key, value, returnOutput, notify, port } = cliToState(
     app.getState() as T
   );
+  if (port) app.port = port; // <- this is required
   (app as any).notifyEnabled = notify;
 
   const handleResult = (res: any) => {
@@ -127,36 +128,37 @@ export async function runDynamicApp<T extends Record<string, any>>(
 
   // ── call ───────────────────────────────────────────────────────────────
   if (command === "call" && key) {
+    const argsIndex = process.argv.indexOf(key) + 1;
+    const args = [process.argv.slice(argsIndex).filter(arg => !arg.startsWith("--")).join(" ")];
+
     const isRunning = await app.probe();
 
-    // Remote instance exists → proxy the call and exit
     if (isRunning) {
       const res = await fetch(`http://localhost:${app.port}/${key}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify([]),
+        body: JSON.stringify(args), // ✅ Send real arguments
       }).then(r => r.json());
+
       handleResult((res as { result?: any }).result);
       process.exit(0);
     }
 
-    const argsIndex = process.argv.indexOf(key) + 1;
-    const args = process.argv.slice(argsIndex).filter(arg => !arg.startsWith("--"));
+    // fallback: probe failed → start a new server
+    if (!isRunning) {
+      return startServer(app, {
+        port: app.port,
+        routes: buildRoutes(app),
+      }).then(async () => {
+        const res = await (app as any)[key](...(Array.isArray(args) ? args : []));
+        handleResult(res);
+      });
+    }
 
-    return startServer(app, {
-      port: app.port,
-      routes: buildRoutes(app),
-    }).then(async () => {
-      const res = await (app as any)[key](...(Array.isArray(args) ? args : []));
-
-      handleResult(res);
-    });
+    // fallback without call → just start
+    return;
   }
-
-  // ── default: just start the server ─────────────────────────────────────
-  return startServer(app, { port: app.port, routes: buildRoutes(app) });
 }
-
 
 function buildRoutes<T extends Record<string, any>>(app: DynamicServerApp<T>): Record<string, RemoteAction<T>> {
   return Object.getOwnPropertyNames(Object.getPrototypeOf(app))
@@ -244,6 +246,7 @@ export function cliToState<T extends Record<string, any>>(defaults: T): {
   value?: string;
   returnOutput: boolean;
   notify: boolean;
+  port?: number;
 } {
   const args = process.argv.slice(2);
   let command: "get" | "set" | "call" | null = null;
@@ -251,6 +254,8 @@ export function cliToState<T extends Record<string, any>>(defaults: T): {
   let notify = false;
   let key: string | undefined;
   let value: string | undefined;
+  let port: number | undefined;
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (typeof arg === "string" && ["get", "set", "call"].includes(arg)) {
@@ -260,9 +265,12 @@ export function cliToState<T extends Record<string, any>>(defaults: T): {
     }
     if (arg === "--return") returnOutput = true;
     if (arg === "--notify") notify = true;
+    if (arg === "--port") port = Number(args[i + 1]);
   }
-  return { command, key, value, returnOutput, notify };
+
+  return { command, key, value, returnOutput, notify, port };
 }
+
 
 export function diffStatePatch<T extends Record<string, any>>(cliArgs: T, current: Partial<T>): Partial<T> {
   return Object.fromEntries(Object.entries(cliArgs).filter(([k, v]) => v !== undefined && v !== current[k])) as Partial<T>;
