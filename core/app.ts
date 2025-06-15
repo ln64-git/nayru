@@ -140,12 +140,15 @@ export async function runDynamicApp<T extends Record<string, any>>(
       process.exit(0);
     }
 
-    // No server yet → start one, THEN invoke the method locally, THEN return
+    const argsIndex = process.argv.indexOf(key) + 1;
+    const args = process.argv.slice(argsIndex).filter(arg => !arg.startsWith("--"));
+
     return startServer(app, {
       port: app.port,
       routes: buildRoutes(app),
     }).then(async () => {
-      const res = await (app as any)[key]();
+      const res = await (app as any)[key](...(Array.isArray(args) ? args : []));
+
       handleResult(res);
     });
   }

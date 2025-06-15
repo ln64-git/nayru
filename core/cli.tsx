@@ -81,21 +81,37 @@ export function AppCli({ app }: AppProps) {
       app.setSystemMessage(`set ${key}: ${value}`);
     }
 
-    else if (cmd === "call" || cmd?.endsWith("()")) {
-      const fn = cmd === "call" ? args[0] : cmd.slice(0, -2);
-      if (!fn) return app.setSystemMessage("Please specify a function to call.");
+    else if (
+      cmd === "call" ||
+      (typeof cmd === "string" && (functionNames.includes(cmd) || cmd.endsWith("()")))
+    ) {
+      const fn = cmd === "call" ? args[0] : cmd.replace(/\(\)$/, "");
+      if (!fn || typeof (app as any)[fn] !== "function") {
+        return app.setSystemMessage(`Unknown function: ${fn}`);
+      }
+
+      // Combine all remaining args into one string (single parameter)
+      const fnArgs = cmd === "call"
+        ? [args.slice(1).join(" ")]
+        : [args.join(" ")];
+
       try {
         const isRunning = await app.probe();
         const result = isRunning
           ? await fetch(`http://localhost:${app.port}/${fn}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify([]),
+            body: JSON.stringify(fnArgs),
           }).then((r) => r.json())
-          : await (app as any)[fn]();
+          : await (app as any)[fn](...fnArgs);
+
         const output = isRunning ? result.result : result;
         await refresh();
-        app.setSystemMessage(typeof output === "string" ? output : JSON.stringify(output, null, 2));
+        app.setSystemMessage(
+          typeof output === "string"
+            ? output
+            : JSON.stringify(output, null, 2)
+        );
       } catch (e: any) {
         app.setSystemMessage(`Error: ${e.message}`);
       }
@@ -147,14 +163,14 @@ export function AppCli({ app }: AppProps) {
   }
 
   useInput((input, key) => {
-    if (key.upArrow && history.length) {
+    if (key.upArrow && history.length > 0) {
       setHistoryIndex((prev) => {
-        const newIndex = prev === null ? history.length - 1 : Math.max(0, prev - 1);
+        const newIndex = prev === null ? history.length - 1 : Math.max(prev - 1, 0);
         setInputValue(history[newIndex] || "");
         return newIndex;
       });
     }
-    if (key.downArrow && history.length) {
+    if (key.downArrow && history.length > 0) {
       setHistoryIndex((prev) => {
         if (prev === null) return null;
         const newIndex = prev + 1;
@@ -166,7 +182,35 @@ export function AppCli({ app }: AppProps) {
         return newIndex;
       });
     }
+
+    // Clear historyIndex when the user types normally
+    if (!key.upArrow && !key.downArrow && input && input.length === 1) {
+      setHistoryIndex(null);
+    }
   });
+
+
+  function formatValue(val: any, depth = 1): string {
+    const indent = "  ".repeat(depth);
+    const outerIndent = "  ".repeat(Math.max(depth - 1, 0));
+
+    if (val === null) return "null";
+    if (typeof val === "undefined") return "undefined";
+    if (typeof val !== "object") return String(val);
+    if (Array.isArray(val)) {
+      if (val.length === 0) return "[]";
+      return `[\n${val.map((v) => indent + formatValue(v, depth + 1)).join(",\n")}\n${outerIndent}]`;
+    }
+
+    const entries = Object.entries(val);
+    if (entries.length === 0) return "{}";
+
+    return `{\n${entries
+      .map(([k, v]) => `${indent}${k}: ${formatValue(v, depth + 1)}`)
+      .join("\n")}\n${outerIndent}}`;
+  }
+
+
 
   return (
     <Box flexDirection="column" paddingLeft={2}>
@@ -188,26 +232,18 @@ export function AppCli({ app }: AppProps) {
           <Box flexDirection="column" paddingLeft={2}>
             {Object.entries(state)
               .filter(([key]) => key !== "port" && key !== "isServerInstance")
-              .map(([key, val]) => {
-                const isObject = val && typeof val === "object";
-                const display = isObject
-                  ? (val.title !== undefined && val.artist !== undefined
-                    ? `${val.title} by ${val.artist}`
-                    : val.title !== undefined
-                      ? String(val.title)
-                      : Object.entries(val)
-                        .map(([k, v]) => `${k}: ${v}`)
-                        .join(" | "))
-                  : String(val);
-
-                return (
-                  <Text key={key}>
+              .map(([key, val]) => (
+                <Box key={key} flexDirection="column">
+                  <Text>
                     <Text color="gray">{key.padEnd(18)}</Text>
-                    <Text color="white">{display}</Text>
                   </Text>
-                );
-              })}
+                  <Box paddingLeft={2}>
+                    <Text color="white">{formatValue(val)}</Text>
+                  </Box>
+                </Box>
+              ))}
           </Box>
+
         </>
       )}
 
