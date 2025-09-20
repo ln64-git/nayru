@@ -268,7 +268,30 @@ export async function runDynamicApp<T extends Record<string, any>>(
       await getStateFromPort(property, targetPortForCommand);
       process.exit(0);
     } else if (command === 'call' && methodName) {
-      await callMethodOnPort(methodName, targetPortForCommand, methodArgs);
+      // Check if there's a server running on the target port
+      const isServerRunning = await app.probe();
+      if (isServerRunning) {
+        await callMethodOnPort(methodName, targetPortForCommand, methodArgs);
+      } else {
+        // Call method directly on local instance
+        console.log(`🔹 Calling ${methodName} locally...`);
+        try {
+          const method = (app as any)[methodName];
+          if (typeof method === 'function') {
+            const result = await method.apply(app, methodArgs);
+            if (result !== undefined) {
+              console.log(result);
+            }
+            console.log(`🔹 ${methodName} completed successfully`);
+          } else {
+            console.error(`🔸 Method '${methodName}' not found on app instance`);
+            process.exit(1);
+          }
+        } catch (error: any) {
+          console.error(`🔸 Error calling ${methodName}: ${error.message}`);
+          process.exit(1);
+        }
+      }
       process.exit(0);
     }
   }
@@ -521,6 +544,12 @@ export function cliToState<T extends Record<string, any>>(defaults: T): {
         }
       }
     }
+  } else if (args.length > 0 && args[0] && !args[0].startsWith('--')) {
+    // If first argument doesn't start with -- and isn't a known command, treat it as a method call
+    // This allows: bun start speak "hello" instead of bun start call speak "hello"
+    command = 'call';
+    methodName = args[0];
+    methodArgs = args.slice(1);
   }
 
   // Parse flags

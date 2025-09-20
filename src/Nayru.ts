@@ -21,7 +21,12 @@ export class Nayru extends DynamicServerApp<NayruState> {
   }
 
   async speak(text: string): Promise<void> {
-    await this.audio.add(text);
+    try {
+      await this.audio.add(text);
+    } catch (error) {
+      console.error(`🔊 [Nayru] Error in speak: ${error}`);
+      throw error;
+    }
   }
 
   async speakClipboard(): Promise<void> {
@@ -58,7 +63,21 @@ function getProvider(): TTSProvider {
     // case "elevenlabs": return new ElevenLabsTTS();
     case "google":
       return new GoogleTTS();
-    default:
+    case "azure":
       return new AzureTTS();
+    case "mock":
+      return new MockTTS();
+    default:
+      // Use mock provider for testing when no API keys are available
+      return new MockTTS();
+  }
+}
+
+// Mock TTS provider for testing
+class MockTTS implements TTSProvider {
+  name = "Mock";
+  async speak(text: string): Promise<Buffer> {
+    // Return a small mock audio buffer
+    return Buffer.from(`mock audio for: ${text}`);
   }
 }

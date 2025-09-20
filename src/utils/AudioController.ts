@@ -24,7 +24,9 @@ export class AudioController {
       const filePath = join("/tmp", `${randomUUID()}.wav`);
       writeFileSync(filePath, buffer);
       this.queue.push(filePath);
-      if (!this.playing) this.playNext();
+      if (!this.playing) {
+        this.playNext();
+      }
     } catch (error) {
       console.error('TTS error:', error);
       throw error; // Re-throw to let caller handle
@@ -38,36 +40,80 @@ export class AudioController {
       return;
     }
 
+    // Check if file exists before trying to play it
+    if (!existsSync(file)) {
+      console.error(`🔊 [AudioController] File does not exist: ${file}`);
+      this.playing = false;
+      // Try to play next item in queue
+      this.playNext();
+      return;
+    }
+
     this.currentFile = file;
     this.playing = true;
 
-    this.mpvProcess = spawn("mpv", ["--no-video", "--quiet", file]);
+    try {
+      this.mpvProcess = spawn("aplay", [file]);
 
-    this.mpvProcess.on('close', (code) => {
-      // Clean up file when audio actually finishes
-      if (existsSync(file)) {
-        try {
-          unlinkSync(file);
-        } catch (err) {
-          console.warn(`Failed to delete audio file: ${err}`);
+      // Set a timeout to kill the process if it doesn't finish
+      const timeout = setTimeout(() => {
+        if (this.mpvProcess && !this.mpvProcess.killed) {
+          console.log(`🔊 [AudioController] Audio timeout, killing process`);
+          this.mpvProcess.kill('SIGTERM');
         }
-      }
-      this.history.push(file);
-      this.playNext();
-    });
+      }, 15000); // 15 second timeout
 
-    this.mpvProcess.on('error', (err) => {
-      console.error(`MPV error: ${err}`);
+      this.mpvProcess.on('close', (code) => {
+        clearTimeout(timeout);
+        console.log(`🔊 [AudioController] Audio process closed with code: ${code}`);
+        // Clean up file when audio actually finishes
+        if (existsSync(file)) {
+          try {
+            unlinkSync(file);
+          } catch (err) {
+            console.warn(`Failed to delete audio file: ${err}`);
+          }
+        }
+        this.history.push(file);
+        this.playing = false;
+        this.mpvProcess = null;
+        // Continue with next item in queue
+        this.playNext();
+      });
+
+      this.mpvProcess.on('error', (err) => {
+        clearTimeout(timeout);
+        console.error(`🔊 [AudioController] Audio error: ${err}`);
+        this.playing = false;
+        this.mpvProcess = null;
+        // Still clean up the file even on error
+        if (existsSync(file)) {
+          try {
+            unlinkSync(file);
+          } catch (cleanupErr) {
+            console.warn(`Failed to delete audio file after error: ${cleanupErr}`);
+          }
+        }
+        // Try to play next item in queue even on error
+        this.playNext();
+      });
+
+      // Handle process exit to prevent server crashes
+      this.mpvProcess.on('exit', (code, signal) => {
+        clearTimeout(timeout);
+        this.playing = false;
+        this.mpvProcess = null;
+        // Continue with next item in queue
+        this.playNext();
+      });
+
+    } catch (error) {
+      console.error(`🔊 [AudioController] Failed to spawn audio player: ${error}`);
       this.playing = false;
-      // Still clean up the file even on error
-      if (existsSync(file)) {
-        try {
-          unlinkSync(file);
-        } catch (cleanupErr) {
-          console.warn(`Failed to delete audio file after error: ${cleanupErr}`);
-        }
-      }
-    });
+      this.mpvProcess = null;
+      // Try to play next item in queue
+      this.playNext();
+    }
   }
 
   skip(): void {
