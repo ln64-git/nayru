@@ -16,8 +16,11 @@ export class Nayru extends DynamicServerApp<NayruState> {
 
   private audio = new AudioController(getProvider());
 
+  constructor() {
+    super();
+  }
+
   async speak(text: string): Promise<void> {
-    console.log(`💬 Queuing: "${text}"`);
     await this.audio.add(text);
   }
 
@@ -27,7 +30,6 @@ export class Nayru extends DynamicServerApp<NayruState> {
       try {
         const hyprClipboard = execSync("wl-paste --no-newline", { encoding: "utf8" });
         if (hyprClipboard) {
-          console.log(`💬 Queuing clipboard: "${hyprClipboard}"`);
           await this.audio.add(hyprClipboard);
         } else {
           console.warn("Clipboard is empty.");
@@ -42,13 +44,21 @@ export class Nayru extends DynamicServerApp<NayruState> {
     this.audio.clear();
   }
 
+  async defaultFunction() {
+    return await this.speakClipboard();
+  }
+
 }
 
 
 function getProvider(): TTSProvider {
-  switch (process.env.TTS_PROVIDER) {
+  const provider = process.env.TTS_PROVIDER;
+
+  switch (provider) {
     // case "elevenlabs": return new ElevenLabsTTS();
-    case "google": return new GoogleTTS();
-    default: return new AzureTTS();
+    case "google":
+      return new GoogleTTS();
+    default:
+      return new AzureTTS();
   }
 }

@@ -6,7 +6,7 @@ import type { TTSProvider } from "../providers/tts-provider";
 
 export class AudioController {
   constructor(private tts: TTSProvider) { }
-  
+
   private queue: string[] = [];
   private history: string[] = [];
   private playing = false;

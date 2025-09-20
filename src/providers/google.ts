@@ -3,7 +3,7 @@ import fetch from "node-fetch";
 import type { TTSProvider } from "./tts-provider";
 
 export class GoogleTTS implements TTSProvider {
-  name = "Azure";
+  name = "Google";
   private apiKey = process.env.GOOGLE_TTS_API_KEY;
   private endpoint = `https://texttospeech.googleapis.com/v1/text:synthesize`;
 
