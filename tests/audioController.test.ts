@@ -1,42 +1,61 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { EventEmitter } from "events";
+import { spawn } from "child_process";
 
-vi.mock("node-mpv", () => {
-  return {
-    __esModule: true,
-    default: class extends EventEmitter {
-      load = vi.fn();
-      pause = vi.fn();
-      resume = vi.fn();
-      stop = vi.fn();
-    },
-  };
-});
-
-vi.mock("../src/utils/azure.ts", () => ({
-  azureTTS: vi.fn(async () => Buffer.from("test")),
+// Mock the spawn function
+vi.mock("child_process", () => ({
+  spawn: vi.fn(),
+  spawnSync: vi.fn(() => ({ stdout: "5.0" })), // Mock ffprobe duration
 }));
+
+// Mock TTS provider
+const mockTTS = {
+  name: "Mock",
+  async speak(text: string) {
+    return Buffer.from(`mock audio for: ${text}`);
+  }
+};
 
 import { AudioController } from "../src/utils/AudioController.ts";
 
 describe("AudioController", () => {
   let controller: AudioController;
-  let mpv: any;
+  let mockProcess: any;
 
   beforeEach(() => {
-    controller = new AudioController();
-    mpv = (controller as any).mpv;
-    (mpv.load as any).mockClear();
+    // Create a mock process that emits events
+    mockProcess = {
+      on: vi.fn(),
+      kill: vi.fn(),
+    };
+
+    (spawn as any).mockReturnValue(mockProcess);
+
+    controller = new AudioController(mockTTS);
   });
 
-  it("loads next file when stopped event emitted", async () => {
-    await controller.add("one");
-    await controller.add("two");
-    (mpv.load as any).mockClear();
+  it("adds text to queue and starts playing", async () => {
+    await controller.add("test text");
 
-    mpv.emit("stopped");
-    await new Promise(r => setTimeout(r, 0));
+    expect(spawn).toHaveBeenCalledWith("mpv", ["--no-video", "--quiet", expect.any(String)]);
+    expect(mockProcess.on).toHaveBeenCalledWith("close", expect.any(Function));
+    expect(mockProcess.on).toHaveBeenCalledWith("error", expect.any(Function));
+  });
 
-    expect(mpv.load).toHaveBeenCalledWith((controller as any).playlist[1]);
+  it("clears queue and stops current process", () => {
+    // Set up a mock process first
+    (controller as any).mpvProcess = mockProcess;
+
+    controller.clear();
+
+    expect(mockProcess.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
+  it("skips current audio", () => {
+    // Set up a mock process first
+    (controller as any).mpvProcess = mockProcess;
+
+    controller.skip();
+
+    expect(mockProcess.kill).toHaveBeenCalledWith("SIGTERM");
   });
 });

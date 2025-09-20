@@ -14,13 +14,21 @@ export class AudioController {
   private mpvProcess: ChildProcessWithoutNullStreams | null = null;
 
   async add(text: string): Promise<void> {
-    const buffer = await this.tts.speak(text);
-    if (!buffer) return;
+    try {
+      const buffer = await this.tts.speak(text);
+      if (!buffer) {
+        console.warn('TTS returned empty buffer for text:', text);
+        return;
+      }
 
-    const filePath = join("/tmp", `${randomUUID()}.wav`);
-    writeFileSync(filePath, buffer);
-    this.queue.push(filePath);
-    if (!this.playing) this.playNext();
+      const filePath = join("/tmp", `${randomUUID()}.wav`);
+      writeFileSync(filePath, buffer);
+      this.queue.push(filePath);
+      if (!this.playing) this.playNext();
+    } catch (error) {
+      console.error('TTS error:', error);
+      throw error; // Re-throw to let caller handle
+    }
   }
 
   private playNext(): void {
@@ -32,20 +40,40 @@ export class AudioController {
 
     this.currentFile = file;
     this.playing = true;
-    const duration = getDuration(file);
 
     this.mpvProcess = spawn("mpv", ["--no-video", "--quiet", file]);
 
-    setTimeout(() => {
-      if (existsSync(file)) unlinkSync(file);
+    this.mpvProcess.on('close', (code) => {
+      // Clean up file when audio actually finishes
+      if (existsSync(file)) {
+        try {
+          unlinkSync(file);
+        } catch (err) {
+          console.warn(`Failed to delete audio file: ${err}`);
+        }
+      }
       this.history.push(file);
       this.playNext();
-    }, (duration * 1000) + 200);
+    });
+
+    this.mpvProcess.on('error', (err) => {
+      console.error(`MPV error: ${err}`);
+      this.playing = false;
+      // Still clean up the file even on error
+      if (existsSync(file)) {
+        try {
+          unlinkSync(file);
+        } catch (cleanupErr) {
+          console.warn(`Failed to delete audio file after error: ${cleanupErr}`);
+        }
+      }
+    });
   }
 
   skip(): void {
     if (this.mpvProcess) {
-      this.mpvProcess.kill();
+      this.mpvProcess.kill('SIGTERM');
+      this.mpvProcess = null;
     }
   }
 
@@ -60,27 +88,36 @@ export class AudioController {
   }
 
   clear(): void {
-    this.queue.forEach(f => existsSync(f) && unlinkSync(f));
+    // Kill mpv process first to prevent zombie processes
+    if (this.mpvProcess) {
+      this.mpvProcess.kill('SIGTERM');
+      this.mpvProcess = null;
+    }
+
+    // Clean up queued files
+    this.queue.forEach(f => {
+      if (existsSync(f)) {
+        try {
+          unlinkSync(f);
+        } catch (err) {
+          console.warn(`Failed to delete queued audio file: ${err}`);
+        }
+      }
+    });
     this.queue = [];
-    this.playing = false;
+
+    // Clean up current file
     if (this.currentFile && existsSync(this.currentFile)) {
-      unlinkSync(this.currentFile);
+      try {
+        unlinkSync(this.currentFile);
+      } catch (err) {
+        console.warn(`Failed to delete current audio file: ${err}`);
+      }
     }
     this.currentFile = null;
+
+    // Reset state
+    this.playing = false;
     this.history = [];
-    if (this.mpvProcess) {
-      this.mpvProcess.kill();
-    }
   }
-}
-
-
-function getDuration(file: string): number {
-  const result = spawnSync("ffprobe", [
-    "-v", "error",
-    "-show_entries", "format=duration",
-    "-of", "default=noprint_wrappers=1:nokey=1",
-    file
-  ], { encoding: "utf-8" });
-  return parseFloat(result.stdout) || 0;
 }

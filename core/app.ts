@@ -89,7 +89,7 @@ export abstract class DynamicServerApp<T extends Record<string, any>> {
 
     // Simple validation: only update properties that exist on the instance
     Object.entries(data).forEach(([key, value]) => {
-      if (!excludeFromUpdate.has(key) && (Object.prototype.hasOwnProperty.call(this, key) || !(key in this))) {
+      if (!excludeFromUpdate.has(key) && Object.prototype.hasOwnProperty.call(this, key)) {
         (this as any)[key] = value;
       }
     });
@@ -608,15 +608,38 @@ async function getStateFromPort(property: string, targetPort: number): Promise<v
     // Check if server is running on target port
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), 1000);
-    const res = await fetch(`http://localhost:${targetPort}/state`, { signal: controller.signal });
-    clearTimeout(id);
 
-    if (!res.ok) {
-      console.error(`🔸 Server not found on port ${targetPort}`);
+    let res: Response;
+    try {
+      res = await fetch(`http://localhost:${targetPort}/state`, { signal: controller.signal });
+    } catch (fetchError: any) {
+      clearTimeout(id);
+      if (fetchError.name === 'AbortError') {
+        console.error(`🔸 Connection timeout to port ${targetPort}`);
+      } else if (fetchError.code === 'ECONNREFUSED') {
+        console.error(`🔸 Server not found on port ${targetPort}`);
+      } else {
+        console.error(`🔸 Network error connecting to port ${targetPort}: ${fetchError.message}`);
+      }
       process.exit(1);
     }
 
-    const state = await res.json() as Record<string, any>;
+    clearTimeout(id);
+
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => 'Unknown error');
+      console.error(`🔸 Server error on port ${targetPort}: ${res.status} ${res.statusText} - ${errorText}`);
+      process.exit(1);
+    }
+
+    let state: Record<string, any>;
+    try {
+      state = await res.json() as Record<string, any>;
+    } catch (parseError) {
+      console.error(`🔸 Invalid JSON response from port ${targetPort}:`, parseError);
+      process.exit(1);
+    }
+
     const value = state[property];
 
     if (value !== undefined) {
@@ -626,7 +649,7 @@ async function getStateFromPort(property: string, targetPort: number): Promise<v
       process.exit(1);
     }
   } catch (error) {
-    console.error(`🔸 Error getting ${property} from port ${targetPort}:`, error);
+    console.error(`🔸 Unexpected error getting ${property} from port ${targetPort}:`, error);
     process.exit(1);
   }
 }
@@ -638,32 +661,66 @@ async function setStateOnPort<T extends Record<string, any>>(stateUpdate: Partia
     // Check if server is running on target port
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), 1000);
-    const probeRes = await fetch(`http://localhost:${targetPort}/state`, { signal: controller.signal });
+
+    let probeRes: Response;
+    try {
+      probeRes = await fetch(`http://localhost:${targetPort}/state`, { signal: controller.signal });
+    } catch (fetchError: any) {
+      clearTimeout(id);
+      if (fetchError.name === 'AbortError') {
+        console.error(`🔸 Connection timeout to port ${targetPort}`);
+      } else if (fetchError.code === 'ECONNREFUSED') {
+        console.error(`🔸 Server not found on port ${targetPort}`);
+      } else {
+        console.error(`🔸 Network error connecting to port ${targetPort}: ${fetchError.message}`);
+      }
+      process.exit(1);
+    }
+
     clearTimeout(id);
 
     if (!probeRes.ok) {
-      console.error(`🔸 Server not found on port ${targetPort}`);
+      const errorText = await probeRes.text().catch(() => 'Unknown error');
+      console.error(`🔸 Server error on port ${targetPort}: ${probeRes.status} ${probeRes.statusText} - ${errorText}`);
       process.exit(1);
     }
 
     // Set the state
-    const res = await fetch(`http://localhost:${targetPort}/state`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(stateUpdate),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`http://localhost:${targetPort}/state`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(stateUpdate),
+      });
+    } catch (fetchError: any) {
+      if (fetchError.name === 'AbortError') {
+        console.error(`🔸 Connection timeout setting state on port ${targetPort}`);
+      } else if (fetchError.code === 'ECONNREFUSED') {
+        console.error(`🔸 Server disconnected while setting state on port ${targetPort}`);
+      } else {
+        console.error(`🔸 Network error setting state on port ${targetPort}: ${fetchError.message}`);
+      }
+      process.exit(1);
+    }
 
     if (res.ok) {
-      const response = await res.json() as { state?: Partial<T> };
+      let response: { state?: Partial<T> };
+      try {
+        response = await res.json() as { state?: Partial<T> };
+      } catch (parseError) {
+        console.error(`🔸 Invalid JSON response from port ${targetPort}:`, parseError);
+        process.exit(1);
+      }
       console.log(`🔹 State updated successfully on port ${targetPort}:`);
       console.log(JSON.stringify(response.state, null, 2));
     } else {
-      const error = await res.json() as { error?: string };
-      console.error(`🔸 Failed to set state on port ${targetPort}:`, error.error);
+      const errorText = await res.text().catch(() => 'Unknown error');
+      console.error(`🔸 Failed to set state on port ${targetPort}: ${res.status} ${res.statusText} - ${errorText}`);
       process.exit(1);
     }
   } catch (error) {
-    console.error(`🔸 Error setting state on port ${targetPort}:`, error);
+    console.error(`🔸 Unexpected error setting state on port ${targetPort}:`, error);
     process.exit(1);
   }
 }
@@ -694,35 +751,70 @@ async function callMethodOnPort(methodName: string, targetPort: number, args: an
     // Check if server is running on target port
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), 1000);
-    const probeRes = await fetch(`http://localhost:${targetPort}/state`, { signal: controller.signal });
+
+    let probeRes: Response;
+    try {
+      probeRes = await fetch(`http://localhost:${targetPort}/state`, { signal: controller.signal });
+    } catch (fetchError: any) {
+      clearTimeout(id);
+      if (fetchError.name === 'AbortError') {
+        console.error(`🔸 Connection timeout to port ${targetPort}`);
+      } else if (fetchError.code === 'ECONNREFUSED') {
+        console.error(`🔸 Server not found on port ${targetPort}`);
+      } else {
+        console.error(`🔸 Network error connecting to port ${targetPort}: ${fetchError.message}`);
+      }
+      process.exit(1);
+    }
+
     clearTimeout(id);
 
     if (!probeRes.ok) {
-      console.error(`🔸 Server not found on port ${targetPort}`);
+      const errorText = await probeRes.text().catch(() => 'Unknown error');
+      console.error(`🔸 Server error on port ${targetPort}: ${probeRes.status} ${probeRes.statusText} - ${errorText}`);
       process.exit(1);
     }
 
     // Call the method
-    const res = await fetch(`http://localhost:${targetPort}/${methodName}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(args), // Pass the actual arguments
-    });
+    let res: Response;
+    try {
+      res = await fetch(`http://localhost:${targetPort}/${methodName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(args), // Pass the actual arguments
+      });
+    } catch (fetchError: any) {
+      if (fetchError.name === 'AbortError') {
+        console.error(`🔸 Connection timeout calling ${methodName} on port ${targetPort}`);
+      } else if (fetchError.code === 'ECONNREFUSED') {
+        console.error(`🔸 Server disconnected while calling ${methodName} on port ${targetPort}`);
+      } else {
+        console.error(`🔸 Network error calling ${methodName} on port ${targetPort}: ${fetchError.message}`);
+      }
+      process.exit(1);
+    }
 
     if (res.ok) {
-      const response = await res.json() as { status?: string; result?: any };
+      let response: { status?: string; result?: any };
+      try {
+        response = await res.json() as { status?: string; result?: any };
+      } catch (parseError) {
+        console.error(`🔸 Invalid JSON response from port ${targetPort}:`, parseError);
+        process.exit(1);
+      }
+
       if (response.result !== undefined) {
         console.log(`🔹 ${methodName} result:`, response.result);
       } else {
         console.log(`🔹 ${methodName} completed successfully`);
       }
     } else {
-      const error = await res.json() as { error?: string };
-      console.error(`🔸 Failed to call ${methodName} on port ${targetPort}:`, error.error);
+      const errorText = await res.text().catch(() => 'Unknown error');
+      console.error(`🔸 Failed to call ${methodName} on port ${targetPort}: ${res.status} ${res.statusText} - ${errorText}`);
       process.exit(1);
     }
   } catch (error) {
-    console.error(`🔸 Error calling ${methodName} on port ${targetPort}:\n`, error);
+    console.error(`🔸 Unexpected error calling ${methodName} on port ${targetPort}:`, error);
     process.exit(1);
   }
 }
